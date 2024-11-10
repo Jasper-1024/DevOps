@@ -1,0 +1,4 @@
+---
+ansible_user: admin
+ansible_become_pass: admin
+scripts_dir: ./scripts

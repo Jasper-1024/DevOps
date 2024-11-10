@@ -1,0 +1,102 @@
+---
+- hosts: vps
+  # remote_user: root
+  become: true # 使用 sudo
+  become_method: sudo
+
+  vars_files:
+    - "../inventory/group_vars/vars.yml" # 引用vars.yml
+
+  tasks: # Task section
+    - name: Check SSH connectivity
+      wait_for_connection:
+        timeout: 30
+      failed_when: false
+
+    - name: Install dphys-swapfile
+      apt:
+        name: dphys-swapfile
+        state: present
+
+    - name: Check default shell
+      command: "grep -q '^{{ ansible_user }}:.*/bin/zsh$' /etc/passwd"
+      register: zsh_check
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Print result
+      debug:
+        msg: "Zsh is{{ ' not' if zsh_check.rc != 0 else '' }} the default shell for {{ ansible_user }}"
+
+    - name: Copy zsh_init.sh to remote host
+      copy:
+        src: "{{ scripts_dir }}/zsh_init.sh"
+        dest: ~/zsh_init.sh
+        mode: "0755"
+      when: zsh_check.rc != 0
+
+    - name: Run zsh_init.sh and capture output
+      shell: ~/zsh_init.sh
+      register: script_output
+      when: zsh_check.rc != 0
+
+    - name: Display script output
+      debug:
+        var: script_output.stdout_lines
+      when: zsh_check.rc != 0
+
+    - name: Check BBR status
+      command: "sysctl -n net.ipv4.tcp_congestion_control"
+      register: bbr_check
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Print result
+      debug:
+        msg: "BBR is {{ '' if bbr_check.stdout == 'bbr' else 'not' }} enabled"
+
+    - name: Install acc
+      script: "{{ scripts_dir }}/acc.sh"
+      when: bbr_check.stdout != 'bbr'
+
+    - name: Install fail2ban
+      apt:
+        name: fail2ban
+        state: present
+
+    - name: Restart fail2ban service
+      service:
+        name: fail2ban
+        state: restarted
+
+    - name: Check fail2ban installation
+      command: "fail2ban-client ping"
+      register: fail2ban_check
+      changed_when: false
+      failed_when: false
+
+    - name: Print result
+      debug:
+        msg: "Fail2ban is {{ 'installed and working' if fail2ban_check.stdout == 'Server replied: pong' else 'not installed or not working' }}"
+
+    - name: Check if CSF is installed
+      shell: "which csf"
+      register: csf_check
+      ignore_errors: true
+
+    - name: Install CSF
+      script: "{{ scripts_dir }}/csf_init.sh"
+      when: csf_check.rc != 0
+
+    # - name: Check if Docker is installed
+    #   shell: "which docker"
+    #   register: docker_check
+    #   ignore_errors: true
+
+    # - name: Install Docker
+    #   shell: "curl -fsSL https://get.docker.com -o get-docker.sh && \
+    #             sudo sh get-docker.sh && \
+    #             sudo usermod -aG docker {{ ansible_user }}"
+    #   when: docker_check.rc != 0
